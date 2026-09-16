@@ -1,0 +1,15 @@
+# Raw Yelp Open Dataset (multi-GB, download separately)
+data/*
+!data/.gitkeep
+
+# Trained models and generated reports
+artifacts/*
+!artifacts/.gitkeep
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/

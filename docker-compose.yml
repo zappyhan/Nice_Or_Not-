@@ -1,0 +1,33 @@
+# Local development stack: one command to build, train and serve.
+#   docker compose up --build       -> API on http://localhost:8000/docs
+#   docker compose run --rm trainer -> retrain against mounted Yelp data
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: reputation-early-warning:latest
+    ports:
+      - "8000:8000"
+    environment:
+      ARTIFACT_DIR: /app/artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional retraining job. Mount the unpacked Yelp Open Dataset into ./data
+  # and the refreshed bundle lands in ./artifacts, which the API can mount too.
+  trainer:
+    build:
+      context: .
+      target: builder
+    image: reputation-early-warning-trainer:latest
+    volumes:
+      - ./data:/build/data:ro
+      - ./artifacts:/build/artifacts
+    command: >
+      python -m reputation.pipeline.train
+      --source yelp --city Philadelphia
+      --data-dir /build/data --artifact-dir /build/artifacts

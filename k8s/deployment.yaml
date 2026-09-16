@@ -1,0 +1,118 @@
+# Kubernetes manifests for the serving tier.
+#
+#   kubectl apply -f k8s/deployment.yaml
+#
+# The pods are stateless (the model bundle is baked into the image), so scaling
+# is a pure replica change and a rolling update swaps model versions with no
+# downtime -- the portability and reproducibility requirement of the project.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reputation-api
+  labels:
+    app: reputation-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: reputation-api
+  template:
+    metadata:
+      labels:
+        app: reputation-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          image: reputation-early-warning:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ARTIFACT_DIR
+              value: /app/artifacts
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          # Readiness gates traffic until the model bundle is in memory;
+          # liveness restarts a pod that has wedged.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reputation-api
+spec:
+  selector:
+    app: reputation-api
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: ClusterIP
+---
+# Nightly retraining: reviews arrive continuously, so the models are refreshed
+# on a schedule and the bundle is written to a shared volume.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: reputation-retrain
+spec:
+  schedule: "0 2 * * *"          # 02:00 daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: trainer
+              image: reputation-early-warning-trainer:latest
+              command:
+                - python
+                - -m
+                - reputation.pipeline.train
+                - --source
+                - yelp
+                - --data-dir
+                - /data
+                - --artifact-dir
+                - /artifacts
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: "2Gi"
+                limits:
+                  cpu: "2"
+                  memory: "4Gi"
+              volumeMounts:
+                - name: dataset
+                  mountPath: /data
+                  readOnly: true
+                - name: artifacts
+                  mountPath: /artifacts
+          volumes:
+            - name: dataset
+              persistentVolumeClaim:
+                claimName: yelp-dataset
+            - name: artifacts
+              persistentVolumeClaim:
+                claimName: reputation-artifacts
