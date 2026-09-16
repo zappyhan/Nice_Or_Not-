@@ -95,12 +95,42 @@ every finding ships with three real review quotes as evidence.
 
 ## 3. Quickstart
 
+### macOS / Linux
+
 ```bash
 pip install -r requirements.txt
 make demo                 # train on the simulator, then print the top-10 report
 make test                 # 18 tests, ~10 seconds
 make serve                # API docs at http://localhost:8000/docs
 ```
+
+### Windows (PowerShell)
+
+`make` is not available on Windows by default, so run the same commands
+directly. The Makefile is only a shortcut for these.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Point Python at the package -- this is the one step the Makefile does for you.
+# Re-run it in every new terminal session.
+$env:PYTHONPATH = "src"
+
+python -m pytest tests -q                                  # = make test
+python -m reputation.pipeline.train --source synthetic `
+    --n-businesses 120 --months 36                         # = make train
+python -m reputation.pipeline.score --top 10               # = make score
+python -m uvicorn reputation.api.main:app --reload --port 8000   # = make serve
+```
+
+If PowerShell refuses to run the activation script ("running scripts is
+disabled on this system"), unblock it for that terminal only:
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`.
+
+`pytest` finds the package without `PYTHONPATH` because `pyproject.toml` sets
+it, but the `train` and `score` modules need the variable.
 
 Against the real dataset (download and unpack Yelp's JSON into `./data`):
 
