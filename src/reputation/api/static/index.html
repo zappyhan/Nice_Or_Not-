@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reputation Early-Warning</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M7 21l6-7 5 5 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1>Reputation Early-Warning</h1>
+        <p class="brand-sub">Spot the problem before the rating falls</p>
+      </div>
+    </div>
+
+    <div class="controls">
+      <label class="field">
+        <span class="field-label">Restaurant</span>
+        <select id="venue-select" aria-label="Select restaurant"></select>
+      </label>
+      <button id="theme-toggle" class="ghost-button" type="button" aria-label="Switch colour theme">
+        <span aria-hidden="true">◐</span> Theme
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <!-- Plain-English verdict: the one thing an owner reads first. -->
+  <section class="verdict" id="verdict" aria-live="polite">
+    <div class="verdict-head">
+      <span class="pill" id="risk-pill"><span class="pill-dot" aria-hidden="true"></span><span id="risk-label">Loading</span></span>
+      <span class="verdict-period" id="verdict-period"></span>
+    </div>
+    <p class="verdict-text" id="verdict-text">Loading your latest analysis&hellip;</p>
+  </section>
+
+  <!-- Headline numbers. Stat tiles, not charts: each is a single value. -->
+  <section class="tiles" aria-label="Key figures">
+    <article class="tile">
+      <h2 class="tile-label">Chance rating falls</h2>
+      <p class="tile-value" id="tile-risk">&ndash;</p>
+      <p class="tile-note" id="tile-risk-note">over the next 3 months</p>
+    </article>
+    <article class="tile">
+      <h2 class="tile-label">Average rating</h2>
+      <p class="tile-value" id="tile-stars">&ndash;</p>
+      <p class="tile-note" id="tile-stars-note">last 6 months</p>
+    </article>
+    <article class="tile">
+      <h2 class="tile-label">Reviews</h2>
+      <p class="tile-value" id="tile-reviews">&ndash;</p>
+      <p class="tile-note" id="tile-reviews-note">last 6 months</p>
+    </article>
+    <article class="tile">
+      <h2 class="tile-label">Live alerts</h2>
+      <p class="tile-value" id="tile-alerts">&ndash;</p>
+      <p class="tile-note" id="tile-alerts-note">issues spiking now</p>
+    </article>
+  </section>
+
+  <div class="grid-2">
+    <!-- Chart 1: change over time, single series -> no legend, title names it. -->
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title">Average rating by month</h2>
+          <p class="card-sub">Your monthly average, out of 5 stars</p>
+        </div>
+        <button class="ghost-button small" type="button" data-table-toggle="rating-chart">Table</button>
+      </div>
+      <div class="chart" id="rating-chart" role="img" aria-label="Line chart of average rating by month"></div>
+      <div class="table-view" id="rating-chart-table" hidden></div>
+    </section>
+
+    <!-- Chart 2: magnitude comparison against a benchmark -> bars + reference tick. -->
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title">What people complain about</h2>
+          <p class="card-sub">Share of your recent reviews, versus the typical restaurant</p>
+        </div>
+        <button class="ghost-button small" type="button" data-table-toggle="aspect-chart">Table</button>
+      </div>
+      <div class="chart" id="aspect-chart" role="img" aria-label="Bar chart of complaint rate by issue"></div>
+      <div class="chart-key">
+        <span class="key-item"><span class="key-swatch" aria-hidden="true"></span>Your complaint rate</span>
+        <span class="key-item"><span class="key-tick" aria-hidden="true"></span>Market median</span>
+      </div>
+      <div class="table-view" id="aspect-chart-table" hidden></div>
+    </section>
+  </div>
+
+  <!-- Chart 3: momentum for the selected issue. Driven by clicking a bar above. -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title" id="trend-title">Complaint trend</h2>
+        <p class="card-sub" id="trend-sub">Select an issue above to see how it has moved</p>
+      </div>
+      <button class="ghost-button small" type="button" data-table-toggle="trend-chart">Table</button>
+    </div>
+    <div class="chart" id="trend-chart" role="img" aria-label="Line chart of complaint rate over time"></div>
+    <div class="table-view" id="trend-chart-table" hidden></div>
+  </section>
+
+  <!-- The actual recommendation. -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">What to fix first</h2>
+        <p class="card-sub">Ranked by impact on your rating, adjusted for how hard each fix is</p>
+      </div>
+    </div>
+    <ol class="actions" id="actions"></ol>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">Live alerts</h2>
+        <p class="card-sub">Issues rising faster than your own normal range</p>
+      </div>
+    </div>
+    <div id="alerts"></div>
+  </section>
+
+  <p class="footnote">
+    Predictions come from review text only and describe association, not proof of cause.
+    Use them to decide where to look first, not as a guarantee of what will happen.
+  </p>
+</main>
+
+<div class="tooltip" id="tooltip" role="status" aria-live="polite" hidden></div>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

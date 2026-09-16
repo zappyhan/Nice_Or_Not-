@@ -8,9 +8,11 @@ manager actually has —
 > **Is my rating about to fall, why, and which operational problem should I fix first?**
 
 Everything here runs end to end today: `make demo` trains the models on a
-bundled simulator and prints ranked, evidence-backed recommendations. Point the
-same pipeline at the real [Yelp Open Dataset](https://www.yelp.com/dataset) with
-`--source yelp` and nothing else changes.
+bundled simulator, `make serve` opens an owner-facing dashboard at
+<http://localhost:8000>, and the same pipeline runs on the real
+[Yelp Open Dataset](https://www.yelp.com/dataset) with `--source yelp`.
+
+![The owner dashboard](docs/dashboard.png)
 
 ---
 
@@ -100,8 +102,8 @@ every finding ships with three real review quotes as evidence.
 ```bash
 pip install -r requirements.txt
 make demo                 # train on the simulator, then print the top-10 report
-make test                 # 18 tests, ~10 seconds
-make serve                # API docs at http://localhost:8000/docs
+make test                 # 23 tests, ~10 seconds
+make serve                # dashboard at http://localhost:8000 (API docs at /docs)
 ```
 
 ### Windows (PowerShell)
@@ -178,7 +180,40 @@ a non-root user, and exposes `/health` for readiness/liveness probes. A
 
 ---
 
-## 4. Results on the bundled simulator
+## 4. The dashboard
+
+`make serve` (or `docker compose up`) serves a single-page dashboard at
+<http://localhost:8000> aimed at a restaurant owner rather than an analyst. It
+answers the four questions an owner has, in the order they ask them:
+
+| Question | What the page shows |
+| --- | --- |
+| Am I in trouble? | A plain-English verdict line, a risk band (dot **and** written label), and four headline tiles: decline risk, average rating with its 6-month delta, review volume, live alerts |
+| Is my rating moving? | Monthly average rating, with gaps where nobody reviewed instead of an interpolated line |
+| What are people complaining about? | Complaint rate per issue as bars, each with a tick marking the **market median**, so "is this bad?" is answerable at a glance |
+| Is it getting worse? | Click any issue to see its complaint rate month by month |
+| What do I do on Monday? | Ranked action cards: the issue, how far above the market it sits, the estimated star cost, a concrete first action, and three real customer quotes as evidence |
+
+Design and engineering notes worth repeating in the report:
+
+- **No build step, no CDN, no framework.** The page is three static files served
+  by the existing FastAPI app (`src/reputation/api/static/`). That keeps the
+  serving tier one container, works with no internet access during a live demo,
+  and adds zero Python dependencies.
+- **One data hue for every mark.** Colour never encodes rank, and status
+  (risk band, alert severity) always pairs a colour with a written label, so
+  nothing is readable by colour alone.
+- **Every chart has a table view** (the `Table` button) and the page ships a
+  validated dark mode, a keyboard skip link, and a layout that holds at phone
+  width.
+- **The dashboard and the batch reports call the same functions**, so the screen
+  can never disagree with `artifacts/reports.json`.
+
+Endpoints behind it: `/businesses`, `/businesses/{id}/report`,
+`/businesses/{id}/history`, `/businesses/{id}/aspects`, `/alerts`. The
+interactive API explorer is still at `/docs`.
+
+## 5. Results on the bundled simulator
 
 120 venues × 36 months ≈ 71.6k reviews, 3,600 business-months, final 6 months
 held out chronologically (`artifacts/metrics.json` after `make train`):
@@ -209,7 +244,7 @@ contribute, which is the empirical argument for the panel design.
 
 ---
 
-## 5. Repository layout
+## 6. Repository layout
 
 ```
 src/reputation/
@@ -224,22 +259,23 @@ src/reputation/
   pipeline/train.py            CLI: data → fitted bundle + metrics.json
   pipeline/score.py            CLI: bundle → early-warning reports
   api/main.py                  FastAPI service
+  api/static/                  the owner dashboard (index.html, css, js)
 tests/                         pipeline + API tests (the CI gate in the image)
 Dockerfile, docker-compose.yml, k8s/deployment.yaml
 ```
 
-## 6. Mapping to the assessment criteria
+## 7. Mapping to the assessment criteria
 
 | Criterion | Where it lives |
 | --- | --- |
-| Working prototype / user value | `pipeline/score.py`, `api/main.py` — a ranked worklist with actions and evidence |
+| Working prototype / user value | The dashboard (`api/static/`) plus `pipeline/score.py` — an owner-facing screen with ranked actions and evidence |
 | Use of AI + data analytics | Modules 1–4: weak-supervised text classification, robust anomaly detection, gradient boosting, counterfactual attribution |
 | Cloud / Docker / Kubernetes | Multi-stage `Dockerfile`, `docker-compose.yml`, Deployment + Service + nightly `CronJob` |
-| Code quality, structure, documentation | One module per pipeline stage, frozen config, module- and function-level docstrings explaining *why*, 18 automated tests |
+| Code quality, structure, documentation | One module per pipeline stage, frozen config, module- and function-level docstrings explaining *why*, 23 automated tests |
 | Report Section 3 (system design) | This README's architecture section maps 1:1 onto the modules |
 | Report Section 4 (evaluation) | `evaluation/metrics.py` + `artifacts/metrics.json` |
 
-## 7. Known limitations (state these in the report)
+## 8. Known limitations (state these in the report)
 
 1. **Weak labels are noisy.** A 1-star review mentioning two aspects is counted
    as complaining about both. A hand-labelled sample of ~500 reviews would give
@@ -256,13 +292,13 @@ Dockerfile, docker-compose.yml, k8s/deployment.yaml
 5. **Cold-start venues** (< 8 reviews in the trailing window) are excluded
    rather than scored badly; serving them needs a hierarchical/market-prior model.
 
-## 8. Suggested next steps for the group
+## 9. Suggested next steps for the group
 
 - Run `--source yelp` on 2–3 cities and regenerate the Section 4 tables.
 - Hand-label a review sample to measure Module 1 properly, and add a
   DistilBERT variant behind the same interface for the comparison table.
-- Add a small dashboard (Streamlit or React) over the existing API for the
-  Week 12 live demo — the endpoints already return demo-ready JSON.
+- Extend the dashboard: a portfolio view for chain operators (all venues at
+  once) and an email/Slack digest driven by the same alert feed.
 - Write the related-work review (25–30 references): aspect-based sentiment
   analysis, review helpfulness/rating dynamics, statistical process control for
   service quality, and churn-style early-warning systems.

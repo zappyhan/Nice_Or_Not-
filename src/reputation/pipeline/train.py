@@ -152,6 +152,7 @@ def run(args: argparse.Namespace) -> dict:
         "decline_predictor": predictor,
         "star_model": star_model,
         "recommender": recommender,
+        "businesses": businesses,
         "annotated_reviews": annotated,
         "panel": panel,
         "supervised": supervised,

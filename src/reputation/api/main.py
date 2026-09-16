@@ -2,10 +2,13 @@
 
 Endpoints
 ---------
+GET  /                           the owner-facing dashboard (static single page)
 GET  /health                     liveness/readiness probe for Kubernetes
 GET  /metrics-summary            metrics recorded at training time
 GET  /businesses                 risk-ranked list of monitored venues
 GET  /businesses/{id}/report     full report: risk, causes, evidence, action
+GET  /businesses/{id}/history    monthly rating and complaint-rate series
+GET  /businesses/{id}/aspects    all five aspects scored and ranked
 GET  /alerts                     emerging-complaint alerts, newest first
 POST /analyse                    score ad-hoc review text (no history needed)
 
@@ -25,6 +28,8 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..config import ARTIFACT_DIR, ASPECTS
@@ -32,6 +37,10 @@ from ..models.aspect_classifier import weak_label
 from ..pipeline.score import load_bundle, latest_rows, score_business, score_portfolio
 
 LOGGER = logging.getLogger("reputation.api")
+
+# The dashboard is plain HTML/CSS/JS shipped beside this module -- no build step,
+# no CDN, so it works offline inside the container and in an exam-hall demo.
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # Populated during the lifespan start-up hook below.
 STATE: dict[str, object] = {}
@@ -100,6 +109,7 @@ def list_businesses(limit: int = Query(50, ge=1, le=500)) -> list[dict]:
     return [
         {
             "business_id": r.business_id,
+            "name": _display_name(r.business_id),
             "period": pd.Timestamp(r.period).strftime("%Y-%m"),
             "decline_risk": round(float(r.decline_risk), 4),
             "hist_mean_stars": None if pd.isna(r.hist_mean_stars) else round(float(r.hist_mean_stars), 2),
@@ -109,6 +119,19 @@ def list_businesses(limit: int = Query(50, ge=1, le=500)) -> list[dict]:
     ]
 
 
+def _display_name(business_id: str) -> str:
+    """Human-readable venue name, falling back to the raw id.
+
+    Yelp ships names in the business table; the dashboard shows them because
+    "Sunrise Cafe" means something to an owner and a hash id does not.
+    """
+    businesses = STATE["bundle"].get("businesses")  # type: ignore[union-attr]
+    if businesses is None or "name" not in getattr(businesses, "columns", []):
+        return business_id
+    match = businesses.loc[businesses["business_id"] == business_id, "name"]
+    return str(match.iloc[0]) if len(match) else business_id
+
+
 @app.get("/businesses/{business_id}/report")
 def business_report(business_id: str, period: str | None = None) -> dict:
     """Full early-warning report: risk, ranked causes, evidence, first action."""
@@ -116,6 +139,82 @@ def business_report(business_id: str, period: str | None = None) -> dict:
         return score_business(STATE["bundle"], business_id, period)  # type: ignore[arg-type]
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/businesses/{business_id}/history")
+def business_history(
+    business_id: str, months: int = Query(24, ge=3, le=120)
+) -> dict:
+    """Monthly series behind the dashboard charts.
+
+    Returns the trailing ``months`` of average rating, review volume and
+    per-aspect complaint rates. Months with no reviews are present with a null
+    rating rather than omitted, so a gap in the trend line reads as "nobody
+    reviewed us" instead of silently interpolating over the quiet period.
+    """
+    panel: pd.DataFrame = STATE["bundle"]["panel"]  # type: ignore[index]
+    rows = panel[panel["business_id"] == business_id].sort_values("period").tail(months)
+    if rows.empty:
+        raise HTTPException(status_code=404, detail=f"Unknown business {business_id!r}")
+
+    return {
+        "business_id": business_id,
+        "name": _display_name(business_id),
+        "months": [
+            {
+                "period": pd.Timestamp(r.period).strftime("%Y-%m"),
+                "n_reviews": int(r.n_reviews),
+                "mean_stars": None if pd.isna(r.mean_stars) else round(float(r.mean_stars), 3),
+                "negative_rate": None if pd.isna(r.negative_rate) else round(float(r.negative_rate), 4),
+                **{
+                    aspect: (
+                        None
+                        if pd.isna(getattr(r, f"complaint_rate_{aspect}"))
+                        else round(float(getattr(r, f"complaint_rate_{aspect}")), 4)
+                    )
+                    for aspect in ASPECTS
+                },
+            }
+            for r in rows.itertuples()
+        ],
+    }
+
+
+@app.get("/businesses/{business_id}/aspects")
+def business_aspects(business_id: str) -> dict:
+    """All five aspects scored for the venue's latest month, ranked by priority.
+
+    The report endpoint returns only the top three findings because that is what
+    an owner should act on; the dashboard needs the full five to draw the
+    "you versus the market" comparison without gaps.
+    """
+    supervised: pd.DataFrame = STATE["bundle"]["supervised"]  # type: ignore[index]
+    rows = supervised[supervised["business_id"] == business_id]
+    if rows.empty:
+        raise HTTPException(status_code=404, detail=f"Unknown business {business_id!r}")
+
+    row = rows.sort_values("period").tail(1)
+    scored = STATE["bundle"]["recommender"].explain(row)  # type: ignore[index]
+    return {
+        "business_id": business_id,
+        "name": _display_name(business_id),
+        "period": pd.Timestamp(row["period"].iloc[0]).strftime("%Y-%m"),
+        "decline_risk": round(float(scored["decline_risk"].iloc[0]), 4),
+        "aspects": [
+            {
+                "aspect": r.aspect,
+                "label": r.label,
+                "complaint_rate": round(float(r.complaint_rate), 4),
+                "market_median": round(float(r.market_median), 4),
+                "trend": round(float(r.trend), 4),
+                "attributed_risk": round(float(r.attributed_risk), 4),
+                "estimated_star_cost": round(float(r.estimated_star_cost), 3),
+                "priority_score": round(float(r.priority_score), 4),
+                "suggested_action": r.suggested_action,
+            }
+            for r in scored.itertuples()
+        ],
+    }
 
 
 @app.get("/alerts")
@@ -166,3 +265,23 @@ def analyse(batch: ReviewBatch) -> dict:
             }
         )
     return {"n": len(results), "results": results}
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard
+# --------------------------------------------------------------------------- #
+# Mounted last so it cannot shadow an API route. The page is a single static
+# file that talks to the JSON endpoints above, which keeps the serving tier one
+# container with no Node build stage.
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> FileResponse:
+    """Serve the owner-facing dashboard."""
+    index = STATIC_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="Dashboard assets not installed")
+    return FileResponse(index)

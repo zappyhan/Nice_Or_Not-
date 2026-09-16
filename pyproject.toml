@@ -11,6 +11,10 @@ requires-python = ">=3.10"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The dashboard ships inside the package, so a wheel install still serves it.
+[tool.setuptools.package-data]
+"reputation.api" = ["static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

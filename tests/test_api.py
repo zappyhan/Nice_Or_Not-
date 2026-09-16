@@ -89,6 +89,55 @@ def test_analyse_endpoint_routes_free_text(client):
     assert all(r["is_complaint"] for r in results)
 
 
+def test_history_returns_a_dense_monthly_series(client):
+    business_id = client.get("/businesses?limit=1").json()[0]["business_id"]
+    body = client.get(f"/businesses/{business_id}/history?months=12").json()
+
+    assert body["business_id"] == business_id
+    assert body["name"]                       # a human-readable venue name
+    assert 1 <= len(body["months"]) <= 12
+    periods = [m["period"] for m in body["months"]]
+    assert periods == sorted(periods)         # chronological, oldest first
+    for month in body["months"]:
+        # Quiet months are present with a null rating rather than dropped, so
+        # the dashboard can draw a gap instead of interpolating over them.
+        assert "mean_stars" in month
+        assert month["n_reviews"] >= 0
+        assert "cleanliness" in month
+
+
+def test_aspects_endpoint_returns_all_five_ranked(client):
+    business_id = client.get("/businesses?limit=1").json()[0]["business_id"]
+    body = client.get(f"/businesses/{business_id}/aspects").json()
+
+    assert len(body["aspects"]) == 5
+    scores = [a["priority_score"] for a in body["aspects"]]
+    assert scores == sorted(scores, reverse=True)
+    for aspect in body["aspects"]:
+        assert 0.0 <= aspect["complaint_rate"] <= 1.0
+        assert aspect["suggested_action"]
+
+
+def test_unknown_business_404s_on_dashboard_endpoints(client):
+    assert client.get("/businesses/nope/history").status_code == 404
+    assert client.get("/businesses/nope/aspects").status_code == 404
+
+
+def test_dashboard_page_and_assets_are_served(client):
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "text/html" in page.headers["content-type"]
+    assert "Reputation Early-Warning" in page.text
+
+    for asset in ("/static/dashboard.css", "/static/dashboard.js"):
+        assert client.get(asset).status_code == 200
+
+
+def test_business_list_carries_display_names(client):
+    rows = client.get("/businesses?limit=3").json()
+    assert all(row["name"] for row in rows)
+
+
 def test_metrics_summary_is_served(client):
     metrics = client.get("/metrics-summary").json()
     assert metrics["data"]["source"] == "synthetic"
