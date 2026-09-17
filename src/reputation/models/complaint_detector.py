@@ -87,13 +87,19 @@ def score_series(rates: pd.Series, alpha: float = SETTINGS.ewma_alpha) -> pd.Dat
     The baseline is shifted by one month so that the current observation is
     never part of its own expectation -- the same causality rule enforced in
     the panel features.
+
+    The expanding scale is computed over a plain numpy array rather than a
+    pandas slice per step. Both are O(n^2), but on the real dataset this runs
+    tens of thousands of times (one series per business per aspect) and the
+    pandas version dominated the whole training run.
     """
     clean = rates.astype(float).ffill().fillna(0.0)
     baseline = clean.ewm(alpha=alpha, adjust=False).mean().shift(1)
-    scale = [
-        _robust_scale(clean.iloc[:i].to_numpy()) if i > 0 else np.nan
-        for i in range(len(clean))
-    ]
+    values = clean.to_numpy()
+    scale = np.empty(len(values))
+    scale[0] = np.nan
+    for i in range(1, len(values)):
+        scale[i] = _robust_scale(values[:i])
     z = (clean - baseline) / pd.Series(scale, index=clean.index)
     return pd.DataFrame({"rate": clean, "baseline": baseline, "z_score": z})
 
@@ -120,6 +126,14 @@ def detect_emerging_complaints(
     for business_id, group in panel.groupby("business_id", sort=True):
         group = group.sort_values("period").reset_index(drop=True)
         for aspect in aspects:
+            counts = group[f"n_complaint_{aspect}"]
+            # Most (business, aspect) pairs never reach the alert floor at all --
+            # on the real dataset the complaint matrix is very sparse. Scoring a
+            # series that cannot produce an alert is pure waste, and skipping it
+            # is what makes a full-city run finish in minutes rather than hours.
+            if counts.max() < settings.min_mentions_for_alert:
+                continue
+
             scored = score_series(group[f"complaint_rate_{aspect}"], settings.ewma_alpha)
             for i, row in scored.iterrows():
                 if i < settings.burn_in_months or not np.isfinite(row["z_score"]):

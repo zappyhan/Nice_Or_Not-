@@ -62,6 +62,19 @@ def load_source(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame]:
     businesses = load_yelp_businesses(Path(args.data_dir), city=args.city)
     if businesses.empty:
         raise SystemExit(f"No restaurants found for city={args.city!r}")
+
+    # The peer-relative features compare a venue against the market it trades
+    # in, so mixing every city into one run both weakens the signal and loads
+    # millions of review texts into memory at once.
+    if args.city is None and len(businesses) > 10_000:
+        LOGGER.warning(
+            "Loading %d restaurants across every city (~%d reviews). This needs "
+            "a lot of RAM and mixes unrelated markets into the peer benchmarks. "
+            "Run `python -m reputation.data.inspect` and pass --city, or --limit "
+            "for a trial run.",
+            len(businesses),
+            int(businesses["review_count"].sum()),
+        )
     reviews = load_yelp_reviews(
         Path(args.data_dir), business_ids=businesses["business_id"], limit=args.limit
     )

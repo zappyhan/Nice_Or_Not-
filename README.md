@@ -102,7 +102,7 @@ every finding ships with three real review quotes as evidence.
 ```bash
 pip install -r requirements.txt
 make demo                 # train on the simulator, then print the top-10 report
-make test                 # 23 tests, ~10 seconds
+make test                 # 30 tests, ~10 seconds
 make serve                # dashboard at http://localhost:8000 (API docs at /docs)
 ```
 
@@ -134,12 +134,47 @@ disabled on this system"), unblock it for that terminal only:
 `pytest` finds the package without `PYTHONPATH` because `pyproject.toml` sets
 it, but the `train` and `score` modules need the variable.
 
-Against the real dataset (download and unpack Yelp's JSON into `./data`):
+### Running on the real Yelp Open Dataset
+
+The dataset is not redistributable and is ~9 GB unpacked, so it is not in this
+repository. Download it from <https://www.yelp.com/dataset> (accept the terms,
+then take the JSON archive) and unpack it into `./data`, so you have
+`data/yelp_academic_dataset_business.json` and
+`data/yelp_academic_dataset_review.json`.
+
+Then look before you leap:
+
+```bash
+python -m reputation.data.inspect --data-dir data        # or: make inspect
+```
+
+This reads only `business.json` and prints how many restaurants each city has,
+how many reviews they carry, and a suggested command line. Pick a city from
+that list -- one market is the right unit of analysis here, because the
+peer-relative features compare a venue against the other venues it competes
+with. Then:
 
 ```bash
 python -m reputation.pipeline.train --source yelp --city Philadelphia
 python -m reputation.pipeline.score --top 20 --out artifacts/reports.json
+python -m uvicorn reputation.api.main:app --port 8000     # dashboard on real data
 ```
+
+Add `--limit 200000` for a fast trial run before committing to the full city.
+
+**What to expect.** A large city means a few million review texts: budget a few
+GB of RAM while they load, and roughly 5-15 minutes end to end on a laptop.
+Running with no `--city` at all works but loads every market into one model;
+the trainer warns you when you do. The loader streams both JSON files line by
+line, so peak memory is driven by the reviews you keep, not by the file size.
+
+**Verification status.** The `--source yelp` code path is covered by
+`tests/test_yelp_loader.py`, which asserts against Yelp's real record format --
+the actual key names, `stars` arriving as a float, the
+`2018-07-07 22:09:11` timestamp format, null `categories` and `attributes`, and
+non-restaurant venues being filtered out. The published numbers in the next
+section are still from the bundled simulator; regenerating them on the real
+corpus is the group's job, and Section 9 says so.
 
 Containers:
 
@@ -250,6 +285,7 @@ contribute, which is the empirical argument for the panel design.
 src/reputation/
   config.py                    all hyper-parameters in one frozen dataclass
   data/loader.py               Yelp JSON streaming + synthetic corpus generator
+  data/inspect.py              dataset preflight: which city, how big, how long
   features/panel.py            business×month panel, leak-free windows, labels
   models/aspect_classifier.py  Module 1
   models/complaint_detector.py Module 2
@@ -271,7 +307,7 @@ Dockerfile, docker-compose.yml, k8s/deployment.yaml
 | Working prototype / user value | The dashboard (`api/static/`) plus `pipeline/score.py` — an owner-facing screen with ranked actions and evidence |
 | Use of AI + data analytics | Modules 1–4: weak-supervised text classification, robust anomaly detection, gradient boosting, counterfactual attribution |
 | Cloud / Docker / Kubernetes | Multi-stage `Dockerfile`, `docker-compose.yml`, Deployment + Service + nightly `CronJob` |
-| Code quality, structure, documentation | One module per pipeline stage, frozen config, module- and function-level docstrings explaining *why*, 23 automated tests |
+| Code quality, structure, documentation | One module per pipeline stage, frozen config, module- and function-level docstrings explaining *why*, 30 automated tests |
 | Report Section 3 (system design) | This README's architecture section maps 1:1 onto the modules |
 | Report Section 4 (evaluation) | `evaluation/metrics.py` + `artifacts/metrics.json` |
 

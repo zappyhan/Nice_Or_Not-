@@ -2,7 +2,7 @@
 PYTHON ?= python3
 export PYTHONPATH := src
 
-.PHONY: install test train score serve demo docker clean
+.PHONY: install test train train-yelp inspect score serve demo docker clean
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -12,6 +12,9 @@ test:
 
 train:                ## Train on the bundled simulator (no download required)
 	$(PYTHON) -m reputation.pipeline.train --source synthetic --n-businesses 120 --months 36
+
+inspect:              ## Preflight the Yelp download: which cities, how big
+	$(PYTHON) -m reputation.data.inspect --data-dir data
 
 train-yelp:           ## Train on the real Yelp Open Dataset in ./data
 	$(PYTHON) -m reputation.pipeline.train --source yelp --city Philadelphia
