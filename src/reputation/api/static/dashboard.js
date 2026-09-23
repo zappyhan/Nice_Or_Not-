@@ -16,6 +16,7 @@ const ASPECT_NAMES = {
   food_quality: "Food quality",
   cleanliness: "Cleanliness",
   price_value: "Price / value",
+  ambience: "Ambience",
   wait_time: "Wait time",
 };
 
@@ -26,6 +27,7 @@ const state = {
   history: null,
   aspects: null,
   alerts: [],
+  plan: null,
   selectedAspect: null,
 };
 
@@ -498,6 +500,87 @@ function renderActions() {
     .join("");
 }
 
+function renderAgentPlan() {
+  const container = $("agent-plan");
+  const badge = $("planner-badge");
+  const plan = state.plan;
+
+  if (!plan) {
+    container.innerHTML = `<p class="empty">The agent could not produce a plan for this restaurant.</p>`;
+    badge.hidden = true;
+    return;
+  }
+
+  // Name the planner that actually ran: a deterministic fallback plan must
+  // never be mistaken for one the language model wrote.
+  badge.hidden = false;
+  badge.textContent = plan.planner === "claude" ? "Claude agent" : "rule-based";
+
+  if (!plan.plan.length) {
+    container.innerHTML =
+      `<p class="plan-summary">${plan.summary || "No verified recommendations for this month."}</p>` +
+      `<p class="empty">No plan item passed verification, so nothing is shown here.</p>`;
+    return;
+  }
+
+  const items = plan.plan
+    .map((item) => {
+      const quotes = (item.quotes || []).length
+        ? `<ul class="quotes">${item.quotes.map((q) => `<li class="quote">&ldquo;${q}&rdquo;</li>`).join("")}</ul>`
+        : "";
+      const cites = (item.evidence_review_ids || []).length
+        ? `<p class="plan-cites">Backed by ${item.evidence_review_ids.length} cited review${
+            item.evidence_review_ids.length === 1 ? "" : "s"
+          }: ${item.evidence_review_ids.join(", ")}</p>`
+        : "";
+      return `
+        <li class="action">
+          <div class="action-rank">${item.rank}</div>
+          <div>
+            <h3 class="action-title">${ASPECT_NAMES[item.aspect] || item.aspect}
+              <span class="verified-chip"><span class="pill-dot" aria-hidden="true"></span>verified</span>
+            </h3>
+            <p class="plan-claim">${item.claim}</p>
+            <p class="action-do"><strong>Do this:</strong> ${item.action}</p>
+            ${quotes}
+            ${cites}
+          </div>
+        </li>`;
+    })
+    .join("");
+
+  const rejected = plan.rejected.length
+    ? `<p class="plan-meta"><span class="verified-chip is-rejected">
+         <span class="pill-dot" aria-hidden="true"></span>${plan.rejected.length} claim(s) rejected by the verifier
+       </span></p>`
+    : "";
+
+  container.innerHTML =
+    `<p class="plan-summary">${plan.summary}</p>` +
+    `<ol class="actions">${items}</ol>` +
+    rejected +
+    `<p class="plan-meta">
+       <span>Groundedness ${plan.groundedness === null ? "n/a" : Math.round(plan.groundedness * 100) + "%"}</span>
+       <span>${plan.n_accepted} of ${plan.n_drafted} claims verified</span>
+       <span>${plan.tools_called} tool calls</span>
+       <span>${plan.latency_seconds}s</span>
+     </p>`;
+}
+
+async function loadAgentPlan(businessId) {
+  const container = $("agent-plan");
+  container.innerHTML = `<p class="empty">Running the agent&hellip;</p>`;
+  try {
+    state.plan = await getJSON(`/businesses/${businessId}/plan`);
+  } catch (error) {
+    state.plan = null;
+    container.innerHTML =
+      `<p class="empty">The agent is unavailable: ${error.message}</p>`;
+    return;
+  }
+  renderAgentPlan();
+}
+
 function renderAlerts() {
   const container = $("alerts");
   const rows = state.alerts.slice(0, 8);
@@ -551,6 +634,10 @@ async function loadVenue(businessId) {
   renderTrendChart();
   renderActions();
   renderAlerts();
+
+  // The agent runs several model calls, so it loads after the rest of the page
+  // rather than holding the whole dashboard up behind it.
+  loadAgentPlan(businessId);
 }
 
 function wireTableToggles() {
@@ -562,6 +649,12 @@ function wireTableToggles() {
       button.textContent = showing ? "Table" : "Chart";
       $(button.dataset.tableToggle).hidden = !showing;
     });
+  });
+}
+
+function wirePlanRefresh() {
+  $("plan-refresh").addEventListener("click", () => {
+    if (state.businessId) loadAgentPlan(state.businessId);
   });
 }
 
@@ -599,6 +692,7 @@ function wireResize() {
 async function init() {
   wireTheme();
   wireTableToggles();
+  wirePlanRefresh();
   wireResize();
 
   try {

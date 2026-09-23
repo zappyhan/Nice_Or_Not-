@@ -1,4 +1,4 @@
-# Restaurant Reputation Early-Warning System
+# ReviewRadar — Agentic AI Early Warning for Restaurant Reputation Decline
 
 A reference implementation ("sample model") for the DSA2111 group project idea:
 instead of a basic positive/negative sentiment classifier over Yelp reviews,
@@ -13,6 +13,10 @@ bundled simulator, `make serve` opens an owner-facing dashboard at
 [Yelp Open Dataset](https://www.yelp.com/dataset) with `--source yelp`.
 
 ![The owner dashboard](docs/dashboard.png)
+
+The M5 agent's plan, with every claim verified against the reviews behind it:
+
+![The agent's verified action plan](docs/agent-plan.png)
 
 ---
 
@@ -59,6 +63,17 @@ one. The whole architecture follows from that.
                                      /alerts  /businesses/{id}/report  /analyse
 ```
 
+### Module map (proposal M1–M6 → code)
+
+| Module | Proposal | Where it lives |
+| --- | --- | --- |
+| **M1** | Ingestion & storage: filter restaurants, clean text, monthly per-restaurant features | `data/loader.py`, `data/inspect.py`, `features/panel.py` |
+| **M2** | Aspect classifier: aspect + sentiment per review | `models/aspect_classifier.py` |
+| **M3** | Trend detector: rolling z-scores on negative aspect mentions | `models/complaint_detector.py` |
+| **M4** | Decline forecaster: gradient boosting + per-aspect attribution | `models/decline_predictor.py`, `models/recommender.py` |
+| **M5** | **Agent: LLM planner with tool calling, evidence retrieval and a claim verifier** | `agents/` (`tools.py`, `planner.py`, `verifier.py`, `agent.py`) |
+| **M6** | Serving & deployment: REST services, owner dashboard, monitoring job | `api/`, `Dockerfile`, `docker-compose.yml`, `k8s/` |
+
 ### Module 1 — Aspect classification (`models/aspect_classifier.py`)
 Yelp gives stars but no aspect labels, so the model is trained by **weak
 supervision**: a seed lexicon produces noisy multi-labels, and a TF-IDF +
@@ -102,7 +117,7 @@ every finding ships with three real review quotes as evidence.
 ```bash
 pip install -r requirements.txt
 make demo                 # train on the simulator, then print the top-10 report
-make test                 # 30 tests, ~10 seconds
+make test                 # 40 tests, ~20 seconds
 make serve                # dashboard at http://localhost:8000 (API docs at /docs)
 ```
 
@@ -215,7 +230,77 @@ a non-root user, and exposes `/health` for readiness/liveness probes. A
 
 ---
 
-## 4. The dashboard
+## 4. M5 — the agent
+
+The agent is what turns analysis into a plan an owner can act on, and the
+reason it can be trusted is that **it is not allowed to say anything the
+analytics did not produce**.
+
+### The tool surface (`agents/tools.py`)
+
+The agent never touches a DataFrame. Everything it knows it learns by calling
+one of four tools, each returning compact JSON with a provenance field:
+
+| Tool | Workflow step | Returns |
+| --- | --- | --- |
+| `get_aspect_trends` | 1. retrieve trends | complaint rate per aspect, direction of travel |
+| `get_decline_risk` | 2. call the forecaster | risk plus per-aspect attributed contribution |
+| `get_evidence_reviews` | 3. pull evidence | actual reviews, each with a `review_id` to cite |
+| `compare_with_peers` | 4. compare with similar venues | percentile and market median per aspect |
+
+### The planners (`agents/planner.py`)
+
+Two implementations behind one interface, so they are directly comparable:
+
+* **`ClaudePlanner`** — Claude (`claude-opus-5`) with tool calling and adaptive
+  thinking. The model chooses which tools to call, then returns a **structured**
+  plan (JSON schema) whose every item cites review ids. The tool loop is written
+  out rather than delegated to an SDK helper, because the agent must retain
+  every tool result it saw — those results are what the verifier checks against.
+* **`RuleBasedPlanner`** — deterministic, no API key, no network. It is both the
+  offline fallback *and* the baseline the LLM planner is measured against, which
+  is the comparison the proposal's M5 evaluation row asks for.
+
+The response always names which planner ran, so a fallback plan can never be
+mistaken for an LLM plan.
+
+### The claim verifier (`agents/verifier.py`)
+
+The proposal requires a verifier that *"will reject any agent claim that is not
+backed by a retrieved review"*. It is deliberately **mechanical, not another
+LLM call** — a model grading its own output is not independent evidence, and a
+check that can itself hallucinate is not a check. Every plan item is tested on
+three axes:
+
+| Axis | Rejects |
+| --- | --- |
+| `citation` | review ids the evidence tool never returned, or no citation at all |
+| `quotation` | quoted text that does not appear verbatim in a cited review |
+| `statistic` | any number in the claim that matches no tool output (rounding tolerated, invention not) |
+
+Failing items never reach the owner, but they are returned separately rather
+than dropped, so the failure mode is visible in the evaluation. The share that
+survives is the plan's **groundedness** score — M5's headline metric.
+
+This is tested adversarially: `tests/test_agent.py` runs a deliberately
+hallucinating planner that fabricates a review id, a quote, a statistic, and a
+citation-free claim, and asserts that **all four are rejected** and
+groundedness falls to 0. A verifier only ever tested on well-behaved input has
+not been tested.
+
+### Running it
+
+```bash
+python -m reputation.agents.cli --business-id syn_b0007      # one venue
+python -m reputation.agents.cli --compare                    # LLM vs baseline
+curl localhost:8000/businesses/syn_b0007/plan                # same, over HTTP
+```
+
+With no Anthropic credentials configured the deterministic planner runs and
+says so, so a live demo never fails for want of an API key. Set
+`ANTHROPIC_API_KEY` (or run `ant auth login`) to use Claude.
+
+## 5. The dashboard
 
 `make serve` (or `docker compose up`) serves a single-page dashboard at
 <http://localhost:8000> aimed at a restaurant owner rather than an analyst. It
@@ -248,38 +333,43 @@ Endpoints behind it: `/businesses`, `/businesses/{id}/report`,
 `/businesses/{id}/history`, `/businesses/{id}/aspects`, `/alerts`. The
 interactive API explorer is still at `/docs`.
 
-## 5. Results on the bundled simulator
+## 6. Results on the bundled simulator
 
-120 venues × 36 months ≈ 71.6k reviews, 3,600 business-months, final 6 months
-held out chronologically (`artifacts/metrics.json` after `make train`):
+120 venues x 36 months ~ 71.7k reviews, 3,600 business-months, final 6 months
+held out chronologically. Label is the proposal's P2: mean stars over months
+*t+1..t+3* falling at least **0.3** below the mean over *t-2..t* (18.3% positive).
 
 | Metric (held-out) | Current-negativity baseline | Majority baseline | **This system** |
 | --- | --- | --- | --- |
-| ROC-AUC | 0.531 | 0.500 | **0.703** |
-| PR-AUC (base rate 0.244) | 0.256 | 0.244 | **0.521** |
-| Precision@20 | 0.10 | 0.24 | **0.95** |
-| Brier score (lower better) | 0.210 | — | **0.158** |
+| ROC-AUC | 0.479 | 0.500 | **0.716** |
+| PR-AUC (base rate 0.183) | 0.168 | 0.183 | **0.342** |
+| Precision@20 | 0.00 | 0.18 | **0.45** |
+| Brier score (lower better) | 0.196 | — | **0.138** |
 
 Early-warning behaviour against the simulator's injected degradation events
-(46 events): **100% detected**, **median lead time 3 months**, and **96% fired
-before the rating drop became visible** in the star average.
+(46 events): **100% detected**, **median lead time 3 months**, **89% fired
+before the rating drop became visible**.
+
+M5 agent, same corpus, rule-based planner: **groundedness 1.00** (3 of 3 claims
+verified), 6 tool calls, 0.8s per plan. The adversarial planner in the test
+suite scores **0.00** — every fabricated claim is rejected. Those two numbers
+are the ends of the scale the Claude planner will be measured on once the group
+runs it with credentials; that experiment has not been run here.
 
 > **Read these numbers as a working demonstration, not as the paper's results.**
 > The simulator was written to contain the effect the system looks for, so it
 > validates that the pipeline *works*; the report's Section 4 numbers must come
-> from `--source yelp` on the real corpus, where aspect labels are noisier and
-> lead times will be shorter. The one number that is honest on synthetic data is
-> the *relative* gap between the model and the baselines, since both see the same
-> data.
+> from `--source yelp` on the real corpus. The honest signal on synthetic data
+> is the *relative* gap between the model and the baselines, since both see the
+> same data.
 
-Top permutation-importance features on the held-out slice: `hist_mean_stars`,
-`recent_negative_rate`, `delta_negative_rate`, `recent_complaint_rate_cleanliness`,
-`peer_hist_negative_rate` — i.e. level, momentum and peer-relative signals all
-contribute, which is the empirical argument for the panel design.
+Note the PR-AUC fell from 0.52 to 0.34 when the label moved to the proposal's
+0.3-star / *t-2..t* definition. That is expected, not a regression: a 3-month
+baseline carries more short-run noise than a 6-month one, so the target is
+genuinely harder. It is worth saying so explicitly in the report rather than
+quoting the easier number.
 
----
-
-## 6. Repository layout
+## 7. Repository layout
 
 ```
 src/reputation/
@@ -291,6 +381,11 @@ src/reputation/
   models/complaint_detector.py Module 2
   models/decline_predictor.py  Module 3
   models/recommender.py        Module 4 (+ report contract)
+  agents/tools.py              M5: the four tools the agent may call
+  agents/planner.py            M5: Claude planner + rule-based baseline
+  agents/verifier.py           M5: the claim verifier
+  agents/agent.py              M5: the five-step workflow orchestrator
+  agents/cli.py                M5: command-line entry point
   evaluation/metrics.py        ranking metrics, baselines, lead-time analysis
   pipeline/train.py            CLI: data → fitted bundle + metrics.json
   pipeline/score.py            CLI: bundle → early-warning reports
@@ -300,18 +395,19 @@ tests/                         pipeline + API tests (the CI gate in the image)
 Dockerfile, docker-compose.yml, k8s/deployment.yaml
 ```
 
-## 7. Mapping to the assessment criteria
+## 8. Mapping to the assessment criteria
 
 | Criterion | Where it lives |
 | --- | --- |
 | Working prototype / user value | The dashboard (`api/static/`) plus `pipeline/score.py` — an owner-facing screen with ranked actions and evidence |
-| Use of AI + data analytics | Modules 1–4: weak-supervised text classification, robust anomaly detection, gradient boosting, counterfactual attribution |
+| Use of AI + data analytics | M2–M4: weak-supervised text classification, robust anomaly detection, gradient boosting, counterfactual attribution |
+| Agentic AI | M5: tool-calling LLM planner with evidence retrieval and a mechanical claim verifier, plus a deterministic baseline to measure it against |
 | Cloud / Docker / Kubernetes | Multi-stage `Dockerfile`, `docker-compose.yml`, Deployment + Service + nightly `CronJob` |
-| Code quality, structure, documentation | One module per pipeline stage, frozen config, module- and function-level docstrings explaining *why*, 30 automated tests |
+| Code quality, structure, documentation | One module per pipeline stage, frozen config, module- and function-level docstrings explaining *why*, 40 automated tests |
 | Report Section 3 (system design) | This README's architecture section maps 1:1 onto the modules |
 | Report Section 4 (evaluation) | `evaluation/metrics.py` + `artifacts/metrics.json` |
 
-## 8. Known limitations (state these in the report)
+## 9. Known limitations (state these in the report)
 
 1. **Weak labels are noisy.** A 1-star review mentioning two aspects is counted
    as complaining about both. A hand-labelled sample of ~500 reviews would give
@@ -327,12 +423,34 @@ Dockerfile, docker-compose.yml, k8s/deployment.yaml
    fixed year, so absolute lead times will differ from a live review feed.
 5. **Cold-start venues** (< 8 reviews in the trailing window) are excluded
    rather than scored badly; serving them needs a hierarchical/market-prior model.
+6. **The Claude planner has not been run end to end.** The loop, the structured
+   output parsing and the verification are covered by tests with a stubbed
+   client, but no real API call has been made from this repository — the build
+   environment has no outbound network. Groundedness, usefulness, latency and
+   cost for the LLM planner are still to be measured by the group.
+7. **The verifier checks traceability, not truth.** It proves a claim came from
+   the tools; it cannot tell you the tools were right. A correct-looking plan
+   built on a miscalibrated forecaster still passes.
+8. **Deviations from the proposal, deliberate and flagged:** the taxonomy adds
+   `wait_time` as a sixth aspect alongside the proposal's five (drop it in
+   `config.py` to return to the exact set); attribution uses counterfactual
+   interventions rather than SHAP, which suits the calibrated classifier but is
+   a different method from the one in Table 1; and there is no check-in or tips
+   data in the feature set yet, though the proposal mentions both.
 
-## 9. Suggested next steps for the group
+## 10. Suggested next steps for the group
 
 - Run `--source yelp` on 2–3 cities and regenerate the Section 4 tables.
 - Hand-label a review sample to measure Module 1 properly, and add a
   DistilBERT variant behind the same interface for the comparison table.
+- **Run the Claude planner for real** and fill in the M5 evaluation row:
+  groundedness and usefulness against the rule-based baseline, plus latency and
+  cost per plan. The comparison harness is `compare_planners()`; the command is
+  `python -m reputation.agents.cli --compare`.
+- Add a human usefulness rating (1–5, several raters) over a sample of plans —
+  the proposal promises one and only a human can supply it.
+- Add SHAP alongside the counterfactual attribution so Table 1's stated method
+  is reported too, and the two can be compared.
 - Extend the dashboard: a portfolio view for chain operators (all venues at
   once) and an email/Slack digest driven by the same alert feed.
 - Write the related-work review (25–30 references): aspect-based sentiment

@@ -29,11 +29,16 @@ YELP_REVIEW_FILE = "yelp_academic_dataset_review.json"
 # Keeping the taxonomy small keeps the multi-label problem learnable and keeps
 # the final recommendation actionable ("fix X first") rather than vague.
 
+# The first five are the taxonomy fixed in the project proposal (P1). The sixth,
+# wait_time, is a documented extension: queueing is the single most common
+# operational complaint in the corpus and is a different lever from service.
+# Drop it here to return to the proposal's exact five-aspect set.
 ASPECTS: tuple[str, ...] = (
-    "service",
     "food_quality",
+    "service",
     "cleanliness",
     "price_value",
+    "ambience",
     "wait_time",
 )
 
@@ -58,7 +63,10 @@ class Settings:
     min_reviews_horizon: int = 3     # need enough future reviews for a fair label
 
     # --- decline label ------------------------------------------------------
-    decline_threshold: float = 0.20  # a drop of >= 0.2 stars counts as a decline
+    # Proposal P2: y(b,t) = 1 if the mean rating over months t+1..t+3 is at
+    # least 0.3 stars below the mean over months t-2..t.
+    decline_threshold: float = 0.30
+    label_baseline_months: int = 3   # the t-2..t comparison window
 
     # --- aspect classifier --------------------------------------------------
     max_features: int = 50_000
@@ -87,6 +95,7 @@ class Settings:
             "food_quality": 1.4,   # recipe, supplier or chef changes: slower
             "cleanliness": 0.9,    # checklists and audits: fastest
             "price_value": 1.6,    # menu re-pricing: strategic, slow
+            "ambience": 1.5,       # decor, noise, lighting: capital spend
             "wait_time": 1.1,      # process / staffing changes: moderate
         }
     )

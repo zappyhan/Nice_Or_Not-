@@ -31,8 +31,8 @@ def client(tmp_path_factory):
             artifact_dir=str(artifact_dir),
             city=None,
             limit=None,
-            n_businesses=25,
-            months=26,
+            n_businesses=30,
+            months=30,
             skip_importance=True,   # permutation importance is the slow part
         )
     )
@@ -106,11 +106,13 @@ def test_history_returns_a_dense_monthly_series(client):
         assert "cleanliness" in month
 
 
-def test_aspects_endpoint_returns_all_five_ranked(client):
+def test_aspects_endpoint_returns_every_aspect_ranked(client):
     business_id = client.get("/businesses?limit=1").json()[0]["business_id"]
     body = client.get(f"/businesses/{business_id}/aspects").json()
 
-    assert len(body["aspects"]) == 5
+    from reputation.config import ASPECTS
+
+    assert len(body["aspects"]) == len(ASPECTS)
     scores = [a["priority_score"] for a in body["aspects"]]
     assert scores == sorted(scores, reverse=True)
     for aspect in body["aspects"]:

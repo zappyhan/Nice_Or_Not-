@@ -428,3 +428,57 @@ th { color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform
   .controls { width: 100%; }
   .field { flex: 1; }
 }
+
+/* ------------------------------------------------------- M5 agent plan */
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.plan-summary {
+  margin: 0 0 14px;
+  font-size: 15px;
+  line-height: 1.5;
+  padding: 12px 14px;
+  background: var(--series-soft);
+  border-radius: 10px;
+}
+
+.plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.verified-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.verified-chip .pill-dot { background: var(--good); }
+.verified-chip.is-rejected .pill-dot { background: var(--critical); }
+
+.plan-claim { margin: 0 0 8px; font-size: 14px; }
+.plan-cites {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin: 8px 0 0;
+}

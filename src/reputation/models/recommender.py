@@ -40,6 +40,7 @@ ASPECT_LABELS = {
     "food_quality": "food quality and consistency",
     "cleanliness": "cleanliness and hygiene",
     "price_value": "price / value perception",
+    "ambience": "ambience, noise and comfort",
     "wait_time": "waiting and queue time",
 }
 
@@ -48,6 +49,7 @@ PLAYBOOK = {
     "food_quality": "audit recipes and supplier consistency, re-check portioning",
     "cleanliness": "reinstate hourly cleaning checklists and restroom audits",
     "price_value": "revisit portion-to-price ratio or introduce a value set menu",
+    "ambience": "address noise and seating comfort; review lighting and layout",
     "wait_time": "re-sequence kitchen tickets and add staff to the peak window",
 }
 

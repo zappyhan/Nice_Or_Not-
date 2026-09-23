@@ -11,6 +11,10 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
 
+# M5 agent. Optional: the agent falls back to its deterministic planner when
+# the SDK or credentials are absent, so the rest of the system never needs it.
+anthropic>=1.0
+
 # Development / CI
 pytest>=8.0
 httpx>=0.27          # required by fastapi.testclient

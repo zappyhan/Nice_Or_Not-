@@ -8,7 +8,8 @@ GET  /metrics-summary            metrics recorded at training time
 GET  /businesses                 risk-ranked list of monitored venues
 GET  /businesses/{id}/report     full report: risk, causes, evidence, action
 GET  /businesses/{id}/history    monthly rating and complaint-rate series
-GET  /businesses/{id}/aspects    all five aspects scored and ranked
+GET  /businesses/{id}/aspects    every aspect scored and ranked
+GET  /businesses/{id}/plan       M5 agent: verified, cited action plan
 GET  /alerts                     emerging-complaint alerts, newest first
 POST /analyse                    score ad-hoc review text (no history needed)
 
@@ -215,6 +216,30 @@ def business_aspects(business_id: str) -> dict:
             for r in scored.itertuples()
         ],
     }
+
+
+@app.get("/businesses/{business_id}/plan")
+def business_plan(
+    business_id: str,
+    planner: str = Query("auto", pattern="^(auto|claude|rule_based)$"),
+) -> dict:
+    """Run the M5 agent and return a plan in which every claim was verified.
+
+    ``planner=auto`` uses Claude when credentials are configured and the
+    deterministic planner otherwise; the response always names which one ran,
+    so a fallback plan can never be mistaken for an LLM plan. Items that failed
+    verification are returned separately rather than hidden, because "the agent
+    tried to claim this and was stopped" is exactly what the evaluation needs.
+    """
+    from ..agents import build_agent
+    from ..agents.tools import ToolError
+
+    try:
+        return build_agent(STATE["bundle"], planner).run(business_id)  # type: ignore[arg-type]
+    except ToolError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:          # planner unavailable or misconfigured
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/alerts")

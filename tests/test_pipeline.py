@@ -45,8 +45,11 @@ from reputation.models.recommender import (  # noqa: E402
     build_report,
 )
 
-# A small but realistic corpus: big enough to train on, small enough for CI.
-SMALL = dict(n_businesses=40, months=28, seed=7)
+# Big enough for the proposal's decline label (P2) to be learnable, small enough
+# for CI. The label compares a 3-month future window against a 3-month trailing
+# window, so it carries more short-run noise than a longer baseline would: below
+# roughly 60 businesses the test slice is too small to measure signal at all.
+SMALL = dict(n_businesses=70, months=34, seed=7)
 
 
 @pytest.fixture(scope="module")

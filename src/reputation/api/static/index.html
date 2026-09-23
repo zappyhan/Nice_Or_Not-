@@ -111,7 +111,19 @@
     <div class="table-view" id="trend-chart-table" hidden></div>
   </section>
 
-  <!-- The actual recommendation. -->
+  <!-- M5: the agent's plan. Every claim here passed the claim verifier. -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">Action plan <span class="badge" id="planner-badge" hidden></span></h2>
+        <p class="card-sub" id="plan-sub">Written by the ReviewRadar agent, with every claim checked against your reviews</p>
+      </div>
+      <button class="ghost-button small" id="plan-refresh" type="button">Re-run</button>
+    </div>
+    <div id="agent-plan"><p class="empty">Loading the agent plan&hellip;</p></div>
+  </section>
+
+  <!-- The underlying model ranking the agent reasons from. -->
   <section class="card">
     <div class="card-head">
       <div>

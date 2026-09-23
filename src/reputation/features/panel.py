@@ -166,6 +166,14 @@ def build_supervised_frame(
         )
         feat["future_reviews"] = future_n
         feat["future_mean_stars"] = future_stars / future_n.replace(0, np.nan)
+
+        # Label baseline: the proposal compares the future window against the
+        # mean over months t-2..t, which is a shorter and more reactive window
+        # than the feature history. Kept separate from hist_mean_stars so the
+        # label definition can change without disturbing the features.
+        baseline_n = _window_sum(group, "n_reviews", settings.label_baseline_months)
+        baseline_stars = _window_sum(group, "sum_stars", settings.label_baseline_months)
+        feat["label_baseline_stars"] = baseline_stars / baseline_n.replace(0, np.nan)
         rows.append(feat)
 
     supervised = pd.concat(rows, ignore_index=True)
@@ -180,7 +188,7 @@ def build_supervised_frame(
 
     # --- label ---------------------------------------------------------------
     supervised["star_change"] = (
-        supervised["future_mean_stars"] - supervised["hist_mean_stars"]
+        supervised["future_mean_stars"] - supervised["label_baseline_stars"]
     )
     supervised["y_decline"] = (
         supervised["star_change"] <= -settings.decline_threshold
@@ -205,6 +213,7 @@ def feature_columns(frame: pd.DataFrame) -> list[str]:
         "period",
         "future_reviews",
         "future_mean_stars",
+        "label_baseline_stars",
         "star_change",
         "y_decline",
     }

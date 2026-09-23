@@ -57,6 +57,11 @@ ASPECT_LEXICON: dict[str, tuple[str, ...]] = {
         "price", "priced", "overpriced", "expensive", "cheap", "value", "worth",
         "cost", "bill", "pricey", "affordable", "rip off",
     ),
+    "ambience": (
+        "ambience", "ambiance", "atmosphere", "decor", "music", "noisy", "noise",
+        "loud", "lighting", "cosy", "cozy", "cramped", "seating", "vibe",
+        "crowded", "comfortable", "interior",
+    ),
     "wait_time": (
         "wait", "waited", "waiting", "queue", "slow", "long line", "quick",
         "fast", "minutes", "delay", "seated", "reservation",

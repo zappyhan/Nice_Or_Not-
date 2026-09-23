@@ -171,6 +171,11 @@ _PHRASES: dict[str, list[tuple[str, str]]] = {
         ("cheap and cheerful lunch deal", "prices went up again and quality did not"),
         ("worth every dollar", "expensive for what you get, not worth it"),
     ],
+    "ambience": [
+        ("the atmosphere was warm and relaxed", "it was so noisy we could not hold a conversation"),
+        ("lovely decor and comfortable seating", "the tables are cramped and the lighting is harsh"),
+        ("great vibe for a weekend dinner", "the music was far too loud all evening"),
+    ],
     "wait_time": [
         ("we were seated immediately", "we waited 45 minutes for the food to arrive"),
         ("no queue at all on a weekday", "the queue was insane and moved slowly"),
